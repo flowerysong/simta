@@ -49,6 +49,7 @@ struct envelope {
     yastr                e_mail_orig;
     yastr                e_mid;
     yastr                e_subject;
+    struct line_file    *e_err_dsn;
     struct line_file    *e_err_text;
     int                  e_error;
     int                  e_n_rcpt;
@@ -96,7 +97,7 @@ ucl_object_t *env_repr(struct envelope *);
 void          env_rcpt_free(struct envelope *);
 void          env_free(struct envelope *);
 void          rcpt_free(struct recipient *);
-void          env_clear_errors(struct envelope *);
+void          env_clear_errors(struct envelope *, bool);
 int           env_clear(struct envelope *);
 bool          env_is_old(struct envelope *, int);
 int           env_set_id(struct envelope *, char *);

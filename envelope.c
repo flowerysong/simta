@@ -175,25 +175,30 @@ env_rcpt_free(struct envelope *env) {
 
 
 void
-env_clear_errors(struct envelope *env) {
+env_clear_errors(struct envelope *env, bool full_clear) {
     struct recipient *r;
 
     env->e_error = 0;
 
-    if (env->e_err_text != NULL) {
-        line_file_free(env->e_err_text);
-        env->e_err_text = NULL;
-    }
+    line_file_free(env->e_err_text);
+    env->e_err_text = NULL;
 
-    env->e_flags = (env->e_flags & (~ENV_FLAG_BOUNCE));
-    env->e_flags = (env->e_flags & (~ENV_FLAG_TEMPFAIL));
+    line_file_free(env->e_err_dsn);
+    env->e_err_dsn = NULL;
 
-    for (r = env->e_rcpt; r != NULL; r = r->r_next) {
-        if (r->r_err_text != NULL) {
-            line_file_free(r->r_err_text);
-            r->r_err_text = NULL;
+
+    /* FIXME: do we really need to make this optional? */
+    if (full_clear) {
+        env->e_flags = (env->e_flags & (~ENV_FLAG_BOUNCE));
+        env->e_flags = (env->e_flags & (~ENV_FLAG_TEMPFAIL));
+
+        for (r = env->e_rcpt; r != NULL; r = r->r_next) {
+            if (r->r_err_text != NULL) {
+                line_file_free(r->r_err_text);
+                r->r_err_text = NULL;
+            }
+            r->r_status = 0;
         }
-        r->r_status = 0;
     }
 
     return;
@@ -268,7 +273,7 @@ env_free(struct envelope *env) {
     }
 
     env_rcpt_free(env);
-    env_clear_errors(env);
+    env_clear_errors(env, true);
     memset(env, 0, sizeof(struct envelope));
     free(env);
 

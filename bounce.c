@@ -110,17 +110,19 @@ bounce_stdout(struct envelope *bounce_env) {
 
 ino_t
 bounce_dfile_out(struct envelope *bounce_env, SNET *message) {
-    int               ret = 0;
+    bool              err = true;
+    bool              write_body = false;
     char              dfile_fname[ MAXPATHLEN ];
     int               dfile_fd;
-    int               write_body = 0;
-    FILE             *dfile;
+    FILE             *dfile = NULL;
     struct line      *l;
     char             *line;
     yastr             daytime = NULL;
+    yastr             boundary = NULL;
     struct stat       sbuf;
     struct recipient *r;
 
+    /* FIXME: should this be part of the env structure? */
     sprintf(dfile_fname, "%s/D%s", bounce_env->e_dir, bounce_env->e_id);
 
 #ifdef HAVE_LIBOPENDKIM
@@ -136,30 +138,31 @@ bounce_dfile_out(struct envelope *bounce_env, SNET *message) {
     if ((dfile = fdopen(dfile_fd, "w")) == NULL) {
         syslog(LOG_ERR, "Syserror: bounce_dfile_out fdopen %s: %m",
                 dfile_fname);
-        if (close(dfile_fd) != 0) {
-            syslog(LOG_ERR, "Syserror: bounce_dfile_out fclose %s: %m",
-                    dfile_fname);
-        }
-        return (0);
+        goto error;
     }
 
     if (message != NULL) {
         if (fstat(snet_fd(message), &sbuf) != 0) {
             syslog(LOG_ERR, "Syserror: bounce_dfile_out fstat: %m");
-            goto cleanup;
+            goto error;
         }
 
         if (sbuf.st_size < simta_config_int("deliver.queue.bounce_size")) {
-            write_body = 1;
+            write_body = true;
         }
     }
 
     if ((daytime = rfc5322_timestamp()) == NULL) {
-        goto cleanup;
+        goto error;
     }
 
     /* dfile message headers */
-    fprintf(dfile, "From: <mailer-daemon@%s>\n", simta_hostname);
+    boundary = yaslcatprintf(yasldup(bounce_env->e_id), "/%s",
+            simta_config_str("core.masquerade"));
+
+    /* FIXME: shouldn't the return value of fprintf be checked? */
+    fprintf(dfile, "From: <mailer-daemon@%s>\n",
+            simta_config_str("core.masquerade"));
     for (r = bounce_env->e_rcpt; r != NULL; r = r->r_next) {
         if (r->r_rcpt == NULL || *r->r_rcpt == '\0') {
             fprintf(dfile, "To: <%s>\n", simta_postmaster);
@@ -168,25 +171,43 @@ bounce_dfile_out(struct envelope *bounce_env, SNET *message) {
         }
     }
     fprintf(dfile, "Date: %s\n", daytime);
-    fprintf(dfile, "Message-ID: <%s@%s>\n", bounce_env->e_id, simta_hostname);
+    fprintf(dfile, "Message-ID: <%s@%s>\n", bounce_env->e_id,
+            simta_config_str("core.masquerade"));
     fprintf(dfile, "Subject: undeliverable mail\n");
+    fprintf(dfile, "MIME-Version: 1.0\n");
+    fprintf(dfile,
+            "Content-Type: multipart/report; "
+            "report-type=delivery-status; boundary=\"%s\";\n\n",
+            boundary);
+
+    fprintf(dfile, "Content-Transfer-Encoding: 8bit\n");
+    fprintf(dfile, "--%s\n", boundary);
+    fprintf(dfile, "Content-Type: text/plain; charset=UTF-8\n");
     fprintf(dfile, "\n");
 
     for (l = bounce_env->e_err_text->l_first; l != NULL; l = l->line_next) {
         fprintf(dfile, "%s\n", l->line_data);
     }
-    fprintf(dfile, "\n");
+
+    fprintf(dfile, "\n--%s\n", boundary);
+    fprintf(dfile, "Content-Type: message/delivery-status; charset=UTF-8\n");
+    fprintf(dfile, "Reporting-MTA: %s\n", simta_config_str("core.masquerade"));
+
+    for (l = bounce_env->e_err_dsn->l_first; l != NULL; l = l->line_next) {
+        fprintf(dfile, "%s\n", l->line_data);
+    }
 
     if (message != NULL) {
-        if (write_body == 1) {
-            fprintf(dfile, "Bounced message:\n");
+        fprintf(dfile, "\n--%s\n", boundary);
+
+        if (write_body) {
+            fprintf(dfile, "Content-Type: message/rfc822\n\n");
         } else {
-            fprintf(dfile, "Bounced message headers:\n");
+            fprintf(dfile, "Content-Type: text/rfc822-headers\n\n");
         }
-        fprintf(dfile, "\n");
 
         while ((line = snet_getline(message, NULL)) != NULL) {
-            if ((*line == '\0') && (write_body == 0)) {
+            if ((!write_body) && (*line == '\0')) {
                 /* End of headers, stop writing */
                 break;
             } else {
@@ -194,26 +215,30 @@ bounce_dfile_out(struct envelope *bounce_env, SNET *message) {
             }
         }
     }
+    fprintf(dfile, "\n--%s--\n", boundary);
 
-    ret = 1;
-
-cleanup:
-    if (fclose(dfile) != 0) {
-        syslog(LOG_ERR, "Syserror: bounce_dfile_out fclose %s: %m",
-                dfile_fname);
-        ret = 0;
-    }
+    err = false;
 
 error:
-    yaslfree(daytime);
+    if (dfile && (fclose(dfile) != 0)) {
+        syslog(LOG_ERR, "Syserror: bounce_dfile_out fclose %s: %m",
+                dfile_fname);
+        err = true;
+    } else if ((dfile_fd >= 0) && (close(dfile_fd) != 0)) {
+        syslog(LOG_ERR, "Syserror: bounce_dfile_out close %s: %m", dfile_fname);
+        err = true;
+    }
 
-    if (ret != 0) {
-        return (bounce_env->e_dinode);
+    yaslfree(daytime);
+    yaslfree(boundary);
+
+    if (!err) {
+        return bounce_env->e_dinode;
     }
 
     env_dfile_unlink(bounce_env);
 
-    return (0);
+    return 0;
 }
 
 
@@ -378,6 +403,27 @@ bounce_snet(
                     line_append(bounce_env->e_err_text, l->line_data, COPY);
                 }
             }
+        }
+    }
+
+    /* FIXME: does this really need to be conditional? */
+    if (bounce_env->e_err_dsn == NULL) {
+        bounce_env->e_err_dsn = line_file_create();
+    }
+
+    for (r = env->e_rcpt; r != NULL; r = r->r_next) {
+        if ((env->e_flags & ENV_FLAG_BOUNCE) || (r->r_status == R_FAILED)) {
+            sprintf(buf, "Final-Recipient: rfc822;%s", r->r_rcpt);
+            if (line_append(bounce_env->e_err_dsn, buf, COPY) == NULL) {
+                syslog(LOG_ERR, "Syserror: bounce_snet line_append: %m");
+                goto cleanup2;
+            }
+            if (line_append(bounce_env->e_err_dsn, "Action: failed\n", COPY) ==
+                    NULL) {
+                syslog(LOG_ERR, "Syserror: bounce_snet line_append: %m");
+                goto cleanup2;
+            }
+            /* FIXME: RFC 3463 Status goes here */
         }
     }
 

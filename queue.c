@@ -1127,7 +1127,7 @@ real_q_deliver(struct deliver *d, struct host_q *deliver_q) {
         }
 
         if (!env_deliver->e_bounceable) {
-            env_clear_errors(env_deliver);
+            env_clear_errors(env_deliver, true);
         }
 
         if (d->d_delivered != 0) {
@@ -1335,7 +1335,7 @@ real_q_deliver(struct deliver *d, struct host_q *deliver_q) {
                                deliver_q->hq_red, "deliver.punt.enabled"))) {
                 syslog(LOG_INFO, "Deliver env <%s>: queueing for punt",
                         env_deliver->e_id);
-                env_clear_errors(env_deliver);
+                env_clear_errors(env_deliver, true);
                 /* Messages that we are punting cannot be punted or bounced */
                 env_deliver->e_puntable = false;
                 env_deliver->e_bounceable = false;
@@ -1542,7 +1542,7 @@ deliver_remote(struct deliver *d, struct host_q *hq) {
             }
         }
 
-        env_clear_errors(d->d_env);
+        env_clear_errors(d->d_env, true);
         d->d_n_rcpt_accepted = 0;
         d->d_n_rcpt_failed = 0;
         d->d_n_rcpt_tempfailed = 0;

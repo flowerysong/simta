@@ -587,9 +587,7 @@ expand(struct envelope *unexpanded_env) {
                 simta_debuglog(2, "Expand env <%s>: %s: errors env dinode %d",
                         unexpanded_env->e_id, env->e_id, (int)env->e_dinode);
 
-                line_file_free(env->e_err_text);
-                env->e_err_text = NULL;
-                env->e_error = 0;
+                env_clear_errors(env, false);
 
                 if (env_outfile(env) != SIMTA_OK) {
                     /* env_outfile syslogs errors */
