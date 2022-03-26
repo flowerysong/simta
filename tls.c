@@ -743,7 +743,6 @@ tls_client_setup(const char *ciphers) {
     }
 
     /* Set level of security expectations */
-    /* FIXME: implement rule.tls.verify */
     ssl_mode = SSL_VERIFY_NONE;
     SSL_CTX_set_verify(ssl_ctx, ssl_mode, NULL);
     return ssl_ctx;
