@@ -633,7 +633,7 @@ snet_getline(SNET *sn, struct timeval *tv) {
             yaslIncrLen(sn->sn_rbuf, rc);
         }
 
-        if (*eol == '\r' || *eol == '\0') {
+        if (*eol == '\r') {
             sn->sn_rstate = SNET_FUZZY;
             break;
         }

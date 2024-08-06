@@ -65,3 +65,18 @@ def test_snet_buffer_max(tool_path):
     assert res.returncode == 1
     assert res.stdout == b'0123456\r\n'
     assert res.stderr == b'snet_eof: Cannot allocate memory\n'
+
+
+def test_snet_null(tool_path):
+    res = subprocess.run(
+        [
+            tool_path('snetcat'),
+            '-',
+        ],
+        check=True,
+        capture_output=True,
+        input=b'hello\0world',
+    )
+
+    # snet_getline() returns null-terminated strings, so output is truncated
+    assert res.stdout == b'hello\r\n'
